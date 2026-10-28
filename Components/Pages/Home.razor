@@ -1,0 +1,72 @@
+@page "/"
+@implements IDisposable
+@inject LabService Lab
+@inject ManagedAgentsService Provider
+<PageTitle>C13 · @LessonEngine.Title</PageTitle>
+<section class="hero" id="application-lab"><div><p class="eyebrow">LEARN BY RUNNING THE EXPERIMENT</p><h1>@LessonEngine.Title</h1><p class="lead">@LessonEngine.Description</p></div><img src="/astronaut.png" alt="" class="astronaut" /></section>
+<nav class="flow" aria-label="Experiment workflow">
+    <div><b>01</b><span>Configure<br /><small>Choose a scenario</small></span></div><i>→</i>
+    <div><b>02</b><span>Run<br /><small>Execute the host logic</small></span></div><i>→</i>
+    <div><b>03</b><span>Verify<br /><small>Inspect the evidence</small></span></div>
+</nav>
+<div class="grid">
+    <article class="card"><p class="eyebrow">THE EXPERIMENT</p><h2>Try the workflow</h2>
+        <fieldset disabled="@busy">
+            <label for="scenario">Scenario</label><select id="scenario" @bind="scenario" @bind:after="SelectScenario">@foreach (var item in LessonEngine.Cases) { <option value="@item.Id">@item.Label</option> }</select>
+            <label for="boundary">Boundary</label><input id="boundary" @bind="boundary" @bind:event="oninput" maxlength="20000" />
+            <label for="current-text">Current text</label><textarea id="current-text" @bind="currentText" @bind:event="oninput" maxlength="20000" rows="3"></textarea>
+            <label for="saved-text">Saved text</label><textarea id="saved-text" @bind="savedText" @bind:event="oninput" maxlength="20000" rows="3"></textarea>
+            <button @onclick="() => RunAsync(false)">Run local experiment ↗</button>
+        </fieldset>
+        <p role="status" aria-live="polite">@status</p>
+        <details><summary>What students learn</summary><ul>@foreach (var concept in LessonEngine.Concepts) { <li>@concept</li> }</ul></details>
+    </article>
+    <article class="card results"><div class="result-head"><h2>Inspect the result</h2><span class="badge">LOCAL HOST</span></div>
+        @if (result is null) { <p>Run a scenario to see its outcome, evidence, and execution steps.</p> }
+        else
+        {
+            <strong class="outcome" data-state="@result.Outcome">@result.Outcome</strong><p>@result.Summary</p>
+            <h3>Execution steps</h3><ol>@foreach (var step in result.Steps) { <li>@step</li> }</ol>
+            <details open><summary>Structured evidence</summary><pre>@LabJson.Format(result.Evidence)</pre></details>
+        }
+    </article>
+</div>
+<section class="note"><strong>Experiment scope</strong><p>@LessonEngine.Scope</p></section>
+<section class="card"><h2>Run live session scenarios</h2><p>Work with real session inventory, event boundaries, reviewed branches, event mirrors, and history snapshots.</p><a href="/live-sessions">Open Live sessions →</a></section>
+<section class="card"><p class="eyebrow">OPTIONAL LIVE PROVIDER</p><h2>Discuss the experiment with Claude</h2>
+    <p>This creates a real text-only Managed Agents session using the Anthropic C# SDK. It explains the current inputs; it does not certify the experiment or test external integrations. API use may incur charges. Credentials stay on the server.</p>
+    @if (!Provider.Configured) { <p>Configure your API key, agent ID and environment ID to enable live commentary. See <a href="/guide.html#run-guide">How to run</a>.</p> }
+    <button disabled="@(busy || !Provider.Configured)" @onclick="() => RunAsync(true)">Request live commentary ↗</button>
+    @if (live is not null) { <p id="live-answer">@(string.IsNullOrEmpty(live.Answer) ? "No answer text was observed." : live.Answer)</p><details><summary>Live session evidence</summary><pre>@LabJson.Format(live)</pre></details> }
+</section>
+<section class="card source"><h2>How it works</h2><p>This is the actual C# lesson implementation executed by the server.</p><details><summary>Read Services/LessonEngine.cs</summary><pre>@LessonEngine.Source</pre></details></section>
+@code {
+    private string scenario = "0", boundary = "e2", currentText = "new draft", savedText = "reviewed draft";
+    private string status = "Local experiment ready. Choose a scenario or edit its inputs.";
+    private bool busy;
+    private ExperimentResult? result;
+    private LiveCommentary? live;
+    private readonly CancellationTokenSource lifetime = new();
+    private void SelectScenario()
+    {
+        var input = LessonEngine.Cases.Single(item => item.Id == scenario).Input;
+        (boundary, currentText, savedText) = (input.Boundary, input.CurrentText, input.SavedText);
+        result = null; live = null;
+        status = "Scenario selected. Edit its inputs or run the experiment.";
+    }
+    private async Task RunAsync(bool requestLive)
+    {
+        busy = true;
+        status = requestLive ? "Waiting for the live text-only session…" : "Running the local experiment…";
+        try
+        {
+            var input = new ExperimentInput(boundary, currentText, savedText);
+            var response = await Lab.RunAsync(input, requestLive, lifetime.Token);
+            if (requestLive) { live = (LiveCommentary)response; status = $"Live commentary stop reason: {live.StopReason}."; }
+            else { result = ((RecordedExperiment)response).ToExperiment(); status = "Experiment recorded in the local run journal."; }
+        }
+        catch (Exception error) { status = error.Message; }
+        finally { busy = false; }
+    }
+    public void Dispose() { lifetime.Cancel(); lifetime.Dispose(); }
+}

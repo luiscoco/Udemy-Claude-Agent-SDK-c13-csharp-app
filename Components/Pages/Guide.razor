@@ -1,0 +1,34 @@
+@page "/guide"
+@page "/guide.html"
+<PageTitle>C13 · Learning and run guide</PageTitle>
+<section class="hero"><div><p class="eyebrow">STUDENT APPLICATION GUIDE · C#</p><h1>@LessonEngine.Title</h1><p class="lead">Explore event boundaries, transfer reviewed context, and compare snapshots in a .NET 10 Blazor application.</p></div><img src="/astronaut.png" alt="" class="astronaut" /></section>
+<section id="learning" class="card"><h2>What you will learn</h2>
+    <ul>@foreach (var concept in LessonEngine.Concepts) { <li>@concept</li> }</ul>
+    <p>@LessonEngine.Scope</p>
+    <div class="student-table"><table><thead><tr><th>Scenario</th><th>Expected outcome</th><th>Evidence to inspect</th></tr></thead><tbody>
+        <tr><td>Branch at a valid boundary (e2)</td><td>passed</td><td>Two selected events; “Later proposal” is excluded. Different text needs restoration.</td></tr>
+        <tr><td>Reject a missing boundary</td><td>rejected</td><td>No branch planned; empty evidence.</td></tr>
+    </tbody></table></div>
+    <p>Try e1 and e3, identical saved/current text, line endings, and non-ASCII text. Hashes represent UTF-8 bytes; each run begins with the same three parent events.</p>
+</section>
+<section id="run-guide" class="card"><h2>How to run</h2><p>Install the .NET 10 SDK. From the new application folder:</p>
+    <pre>dotnet restore
+dotnet run</pre>
+    <p>Open <a href="http://127.0.0.1:5013">http://127.0.0.1:5013</a>. Select a scenario, edit the inputs, run the experiment, and inspect the outcome, steps, and hashes. No API key is needed for local experiments.</p>
+    <h3>Optional live Managed Agents commentary</h3>
+    <p>Copy the configuration example and enter your own credentials and existing resource IDs. Restart after editing:</p>
+    <pre>Copy-Item .env.example .env
+notepad .env
+dotnet run</pre>
+    <p>Supported settings: ANTHROPIC_API_KEY, CLAUDE_MANAGED_AGENT_ID, CLAUDE_MANAGED_ENVIRONMENT_ID, CLAUDE_MODEL and PORT (default 5013). Environment variables and .NET user-secrets are supported. Keep credentials on the server.</p>
+    <p>If resource IDs are missing, explicitly run the setup command. It creates an environment before a text-only agent, saves IDs immediately in .lab-data/resources.json, and reuses existing IDs:</p>
+    <pre>dotnet run -- --setup-resources</pre>
+    <p>Managed Agents access is required for the live path. Select a model available to your account. Live requests may incur charges; a local success is independent of a provider response. If provisioning fails with an uncertain result, inspect your account before retrying.</p>
+    <h3>Verification</h3><pre>dotnet run -- --self-test
+dotnet build -c Release</pre>
+    <p>The self-tests check boundary selection, fresh seed state, UTF-8 hashes, input validation, SDK request serialization, and live event interpretation without contacting Anthropic. The run journal is stored in .lab-data/runs.jsonl.</p>
+</section>
+<section class="card"><h2>Read the implementation</h2><p>Home.razor binds the inputs to the C# services. LessonEngine.cs contains the local experiment. LabService.cs serializes runs and writes the journal. ManagedAgentsService.cs calls Anthropic 13.3.0.</p><a href="/api/source">Read the actual C# lesson source</a></section>
+<section class="card"><h2>Run the live session scenarios</h2><p>Open <a href="/live-sessions">Live sessions</a> after configuring Managed Agents access.</p>
+<ol><li>List live sessions or create a teaching parent. New sessions may incur charges.</li><li>Inspect the parent's canonical event history. Events are mirrored locally by provider event ID.</li><li>Select “Review through here” on an actual event. Read or edit the selected context and accept the transfer.</li><li>Create the reviewed branch. Inspect its child session ID, parent/boundary metadata, pinned agent version, and observed response.</li><li>Try “Reject a missing boundary” with an absent event ID. The result must show zero child-create requests.</li><li>Capture a history snapshot, then compare it with current provider history. Comparisons use canonical UTF-8 JSON hashes. No remote files are restored.</li></ol>
+<p>Live operation evidence is separate from local experiments and commentary. Snapshots, mirrors, known created IDs and run records are stored under .lab-data/live-sessions. On uncertain creation or observation, inspect the reported session ID or your account before retrying.</p></section>

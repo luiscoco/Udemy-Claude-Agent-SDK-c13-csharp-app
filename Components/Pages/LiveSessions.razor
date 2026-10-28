@@ -1,0 +1,98 @@
+@page "/live-sessions"
+@implements IDisposable
+@inject SessionScenarioService Sessions
+<PageTitle>C13 · Live session scenarios</PageTitle>
+<section class="hero"><div><p class="eyebrow">REAL MANAGED AGENTS SESSIONS</p><h1>Live session scenarios</h1><p class="lead">Find sessions, inspect real events, review a boundary, and transfer context into a new session.</p></div></section>
+<section class="note"><strong>Live provider operations</strong><p>Creating a teaching parent or a reviewed branch makes a real Anthropic request and may incur charges. Each new session has a $10 list-cost ceiling. Snapshots and mirrors are local copies of provider event history. Branching transfers reviewed text into a new session; it does not clone the remote container or restore files.</p></section>
+@if (!Sessions.Configured)
+{
+    <section class="card"><h2>Configure live access</h2><p>Set ANTHROPIC_API_KEY, CLAUDE_MANAGED_AGENT_ID and CLAUDE_MANAGED_ENVIRONMENT_ID in .env or user-secrets, then restart the application.</p><pre>dotnet run -- --setup-resources</pre><p><a href="/guide.html#run-guide">Read the configuration guide</a></p></section>
+}
+<div class="grid"><section class="card"><h2>Choose a scenario</h2>
+    <fieldset disabled="@(busy || !Sessions.Configured)">
+        <label for="live-scenario">Live scenario</label><select id="live-scenario" @bind="action">@foreach (var item in SessionScenarioService.Scenarios) { <option value="@item.Id">@item.Label</option> }</select>
+        <p>@SessionScenarioService.Scenarios.Single(item => item.Id == action).Description</p>
+        @if (action == "inventory")
+        { <label for="page-cursor">Page cursor (optional)</label><input id="page-cursor" @bind="page" maxlength="512" /> }
+        @if (action is not ("inventory" or "create-parent"))
+        {
+            <label for="parent-id">Parent session ID</label><input id="parent-id" @bind="sessionId" @bind:event="oninput" @bind:after="InvalidateReview" maxlength="512" />
+        }
+        @if (action is "preview" or "branch" or "reject-missing")
+        {
+            <label for="event-id">Boundary event ID</label><input id="event-id" @bind="boundaryId" @bind:event="oninput" @bind:after="InvalidateReview" maxlength="512" />
+        }
+        @if (action == "branch")
+        {
+            <p>Run “Review a branch boundary” first. The preview binds the transfer to the selected history.</p>
+            <label for="reviewed-context">Reviewed context</label><textarea id="reviewed-context" @bind="reviewedContext" @bind:event="oninput" @bind:after="() => reviewAccepted = false" rows="6" maxlength="20000"></textarea>
+            <label for="review-accepted">I reviewed this context for transfer</label><input id="review-accepted" type="checkbox" @bind="reviewAccepted" />
+            <p>@(string.IsNullOrEmpty(historyHash) ? "No boundary preview is loaded." : "A boundary preview is loaded. Only the reviewed text above will be transferred.")</p>
+        }
+        @if (action == "compare-snapshot")
+        { <label for="snapshot-id">Snapshot ID</label><input id="snapshot-id" @bind="snapshotId" maxlength="32" /> }
+        <button @onclick="RunAsync" disabled="@(action == "branch" && (!reviewAccepted || string.IsNullOrEmpty(historyHash)))">@(action == "branch" ? "Create reviewed branch ↗" : action == "create-parent" ? "Create teaching parent ↗" : "Run live scenario ↗")</button>
+    </fieldset>
+    <p role="status" aria-live="polite">@status</p>
+    @if (busy) { <button @onclick="Cancel">Cancel observation</button> }
+</section>
+<section class="card results"><div class="result-head"><h2>Provider evidence</h2><span class="badge">LIVE SESSIONS</span></div>
+    @if (result is null) { <p>List live sessions or create a teaching parent to begin. Read operations do not create sessions.</p> }
+    else { <strong class="outcome" data-state="@result.Outcome">@result.Outcome</strong><p>@result.Summary</p><details open><summary>Structured provider evidence</summary><pre>@LabJson.Format(result)</pre></details> }
+</section></div>
+@if (inventory.Count > 0 || !string.IsNullOrEmpty(nextPage))
+{
+    <section class="card"><h2>Session inventory</h2><div class="student-table"><table><thead><tr><th>Session</th><th>Status</th><th>Action</th></tr></thead><tbody>
+        @foreach (var item in inventory) { var id = Text(item, "id"); <tr><td>@id<br />@Text(item, "title")</td><td>@Text(item, "status")</td><td><button disabled="@busy" @onclick="() => SelectSession(id)">Inspect events</button></td></tr> }
+    </tbody></table></div>
+    @if (!string.IsNullOrEmpty(nextPage)) { <button disabled="@busy" @onclick="NextPageAsync">Load next page</button> }
+    </section>
+}
+@if (events.Count > 0)
+{
+    <section class="card"><h2>Canonical parent events</h2><p>Select an event to preview context through that boundary. Parent session: @eventsSessionId</p><div class="student-table"><table><thead><tr><th>Event ID</th><th>Type and text</th><th>Boundary</th></tr></thead><tbody>
+        @foreach (var item in events) { var id = Text(item, "id"); <tr><td><code>@id</code></td><td>@Text(item, "type")<p>@EventText(item)</p></td><td><button disabled="@busy" @onclick="() => PreviewAsync(id)">Review through here</button></td></tr> }
+    </tbody></table></div></section>
+}
+@code {
+    private string action = "inventory", sessionId = "", boundaryId = "", reviewedContext = "", historyHash = "", snapshotId = "", page = "", nextPage = "", eventsSessionId = "";
+    private bool busy, reviewAccepted;
+    private string status = "Ready. Choose a live session scenario.";
+    private SessionScenarioResult? result;
+    private List<System.Text.Json.JsonElement> inventory = [], events = [];
+    private CancellationTokenSource? operation;
+    private void InvalidateReview() { historyHash = ""; reviewedContext = ""; reviewAccepted = false; }
+    private void SelectSession(string id) { sessionId = id; action = "inspect"; InvalidateReview(); }
+    private async Task PreviewAsync(string id) { sessionId = eventsSessionId; boundaryId = id; action = "preview"; InvalidateReview(); await RunAsync(); }
+    private async Task NextPageAsync() { page = nextPage; action = "inventory"; await RunAsync(); }
+    private static string Text(System.Text.Json.JsonElement item, string key) => item.TryGetProperty(key, out var value) ? value.ToString() : "";
+    private static string EventText(System.Text.Json.JsonElement item) => item.TryGetProperty("content", out var content) && content.ValueKind == System.Text.Json.JsonValueKind.Array
+        ? string.Join("\n", content.EnumerateArray().Where(b => Text(b, "type") == "text").Select(b => Text(b, "text"))) : "";
+    private async Task RunAsync()
+    {
+        if (busy) return;
+        busy = true; status = "Running live scenario…";
+        operation = new();
+        try
+        {
+            var input = new SessionScenarioInput(action, sessionId, boundaryId, reviewedContext, historyHash, reviewAccepted, snapshotId, page);
+            result = await Sessions.RunAsync(input, operation.Token);
+            status = result.Summary;
+            var evidence = result.Evidence;
+            if (evidence.TryGetProperty("sessions", out var sessions)) { inventory = sessions.EnumerateArray().Select(e => e.Clone()).ToList(); nextPage = Text(evidence, "nextPage"); }
+            if (result.Action == "create-parent" && evidence.TryGetProperty("sessionId", out var created)) { sessionId = created.GetString()!; InvalidateReview(); }
+            if (evidence.TryGetProperty("events", out var listed)) { events = listed.EnumerateArray().Select(e => e.Clone()).ToList(); eventsSessionId = sessionId; }
+            if (result.Action == "preview" && result.Outcome == "passed")
+            {
+                historyHash = Text(evidence, "historyHash"); reviewedContext = Text(evidence, "reviewedContext"); reviewAccepted = false; action = "branch";
+                status = "Boundary loaded. Review or edit the context, accept the transfer, then create the branch.";
+            }
+            if (evidence.TryGetProperty("snapshotId", out var captured)) snapshotId = captured.GetString()!;
+            if (result.Action == "branch") reviewAccepted = false;
+        }
+        catch (Exception error) { status = error.Message; }
+        finally { busy = false; operation.Dispose(); operation = null; }
+    }
+    private void Cancel() => operation?.Cancel();
+    public void Dispose() => operation?.Cancel();
+}

@@ -1,0 +1,24 @@
+@inherits LayoutComponentBase
+@inject IJSRuntime JS
+<main class="wrap">
+    <nav class="student-nav" aria-label="Application sections">
+        <a href="/guide.html#learning">What you will learn</a>
+        <a href="/guide.html#run-guide">How to run</a>
+        <a href="/architecture.html">Architecture &amp; workflow</a>
+        <a href="/#application-lab">Application lab</a>
+        <a href="/live-sessions">Live sessions</a>
+        <button type="button" @onclick="ToggleTheme" aria-pressed="@dark.ToString().ToLowerInvariant()">Switch to @(dark ? "light" : "dark") mode</button>
+    </nav>
+    <header><div class="brand">How <span>Claude Managed Agents</span> Works</div><span class="badge">CONCEPT 13 / 60 · C#</span></header>
+    @Body
+    <footer>CONFIGURE → RUN → VERIFY · .NET 10 / Blazor student application</footer>
+</main>
+<div id="blazor-error-ui" data-nosnippet>An unexpected error occurred. <a href="/">Reload</a></div>
+@code {
+    private bool dark;
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) { dark = await JS.InvokeAsync<bool>("lessonTheme.initialize"); StateHasChanged(); }
+    }
+    private async Task ToggleTheme() { dark = await JS.InvokeAsync<bool>("lessonTheme.toggle"); }
+}
